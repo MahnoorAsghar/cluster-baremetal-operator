@@ -109,6 +109,7 @@ func createImageCustomizationContainer(images *Images, info *ProvisioningInfo, i
 		VolumeMounts: []corev1.VolumeMount{
 			imageRegistriesVolumeMount,
 			imageVolumeMount,
+			ironicAgentPullSecretMount,
 		},
 		ImagePullPolicy: "IfNotPresent",
 		Env: append(envVars, corev1.EnvVar{
@@ -140,8 +141,7 @@ func createImageCustomizationContainer(images *Images, info *ProvisioningInfo, i
 				Name:  ipOptions,
 				Value: info.NetworkStack.IpOption(),
 			},
-			buildSSHKeyEnvVar(info.SSHKey),
-			pullSecret),
+			buildSSHKeyEnvVar(info.SSHKey)),
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "http",

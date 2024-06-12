@@ -51,8 +51,9 @@ const (
 	ironicTlsVolume                  = "metal3-ironic-tls"
 	inspectorTlsVolume               = "metal3-inspector-tls"
 	vmediaTlsVolume                  = "metal3-vmedia-tls"
-	ironicHtpasswdEnvVar             = "IRONIC_HTPASSWD"    // #nosec
-	inspectorHtpasswdEnvVar          = "INSPECTOR_HTPASSWD" // #nosec
+	ironicHtpasswdVolume             = "ironic-htpasswd"          // #nosec G101
+	inspectorHtpasswdVolume          = "inspector-htpasswd"       // #nosec G101
+	ironicAgentPullSecretVolume      = "ironic-agent-pull-secret" // #nosec G101
 	ironicInsecureEnvVar             = "IRONIC_INSECURE"
 	inspectorInsecureEnvVar          = "IRONIC_INSPECTOR_INSECURE"
 	ironicKernelParamsEnvVar         = "IRONIC_KERNEL_PARAMS"
@@ -69,8 +70,10 @@ const (
 	cboOwnedAnnotation               = "baremetal.openshift.io/owned"
 	cboLabelName                     = "baremetal.openshift.io/cluster-baremetal-operator"
 	externalTrustBundleConfigMapName = "cbo-trusted-ca"
-	pullSecretEnvVar                 = "IRONIC_AGENT_PULL_SECRET" // #nosec
 	forceInspectorEnvVar             = "USE_IRONIC_INSPECTOR"
+	ironicAgentPullSecretPath        = "/run/secrets"          // #nosec G101
+	ironicHtpasswdPath               = "/etc/ironic"           // #nosec G101
+	inspectorHtpasswdPath            = "/etc/ironic-inspector" // #nosec G101
 )
 
 var ironicUserID int64 = 1002
@@ -119,16 +122,22 @@ var vmediaTlsMount = corev1.VolumeMount{
 	ReadOnly:  true,
 }
 
-var pullSecret = corev1.EnvVar{
-	Name: pullSecretEnvVar,
-	ValueFrom: &corev1.EnvVarSource{
-		SecretKeyRef: &corev1.SecretKeySelector{
-			LocalObjectReference: corev1.LocalObjectReference{
-				Name: PullSecretName,
-			},
-			Key: openshiftConfigSecretKey,
-		},
-	},
+var ironicAgentPullSecretMount = corev1.VolumeMount{
+	Name:      ironicAgentPullSecretVolume,
+	MountPath: ironicAgentPullSecretPath,
+	ReadOnly:  true,
+}
+
+var ironicHtpasswdMount = corev1.VolumeMount{
+	Name:      ironicHtpasswdVolume,
+	MountPath: ironicHtpasswdPath,
+	ReadOnly:  true,
+}
+
+var inspectorHtpasswdMount = corev1.VolumeMount{
+	Name:      inspectorHtpasswdVolume,
+	MountPath: inspectorHtpasswdPath,
+	ReadOnly:  true,
 }
 
 func trustedCAVolume() corev1.Volume {
@@ -213,6 +222,39 @@ var metal3Volumes = []corev1.Volume{
 			},
 		},
 	},
+	{
+		Name: ironicAgentPullSecretVolume,
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: PullSecretName,
+				Items: []corev1.KeyToPath{
+					{Key: openshiftConfigSecretKey, Path: PullSecretName},
+				},
+			},
+		},
+	},
+	{
+		Name: ironicHtpasswdVolume,
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: ironicSecretName,
+				Items: []corev1.KeyToPath{
+					{Key: ironicHtpasswdKey, Path: ironicHtpasswdKey},
+				},
+			},
+		},
+	},
+	{
+		Name: inspectorHtpasswdVolume,
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: inspectorSecretName,
+				Items: []corev1.KeyToPath{
+					{Key: ironicHtpasswdKey, Path: ironicHtpasswdKey},
+				},
+			},
+		},
+	},
 }
 
 func buildEnvVar(name string, baremetalProvisioningConfig *metal3iov1alpha1.ProvisioningSpec) corev1.EnvVar {
@@ -242,20 +284,6 @@ func getKernelParams(config *metal3iov1alpha1.ProvisioningSpec, networkStack Net
 	// OCPBUGS-872: workaround for https://bugzilla.redhat.com/show_bug.cgi?id=2111675
 	return fmt.Sprintf("rd.net.timeout.carrier=30 %s",
 		IpOptionForProvisioning(config, networkStack))
-}
-
-func setIronicHtpasswdHash(name string, secretName string) corev1.EnvVar {
-	return corev1.EnvVar{
-		Name: name,
-		ValueFrom: &corev1.EnvVarSource{
-			SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{
-					Name: secretName,
-				},
-				Key: ironicHtpasswdKey,
-			},
-		},
-	}
 }
 
 func setIronicExternalIp(name string, config *metal3iov1alpha1.ProvisioningSpec) corev1.EnvVar {
@@ -514,13 +542,15 @@ func createContainerMetal3Httpd(images *Images, config *metal3iov1alpha1.Provisi
 		inspectorPort = inspectorPrivatePort
 	}
 
-	volumes := []corev1.VolumeMount{
+	volumeMounts := []corev1.VolumeMount{
 		sharedVolumeMount,
 		ironicCredentialsMount,
 		inspectorCredentialsMount,
 		imageVolumeMount,
 		ironicTlsMount,
 		inspectorTlsMount,
+		ironicHtpasswdMount,
+		inspectorHtpasswdMount,
 	}
 	ports := []corev1.ContainerPort{
 		{
@@ -541,7 +571,7 @@ func createContainerMetal3Httpd(images *Images, config *metal3iov1alpha1.Provisi
 	}
 
 	if !config.DisableVirtualMediaTLS {
-		volumes = append(volumes, vmediaTlsMount)
+		volumeMounts = append(volumeMounts, vmediaTlsMount)
 		ports = append(ports, corev1.ContainerPort{
 			Name:          vmediaHttpsPortName,
 			ContainerPort: int32(httpsPort),
@@ -561,7 +591,7 @@ func createContainerMetal3Httpd(images *Images, config *metal3iov1alpha1.Provisi
 			},
 		},
 		Command:      []string{"/bin/runhttpd"},
-		VolumeMounts: volumes,
+		VolumeMounts: volumeMounts,
 		Env: []corev1.EnvVar{
 			buildEnvVar(httpPort, config),
 			buildEnvVar(provisioningIP, config),
@@ -569,8 +599,6 @@ func createContainerMetal3Httpd(images *Images, config *metal3iov1alpha1.Provisi
 			buildSSHKeyEnvVar(sshKey),
 			buildEnvVar(provisioningMacAddresses, config),
 			buildEnvVar(vmediaHttpsPort, config),
-			setIronicHtpasswdHash(ironicHtpasswdEnvVar, ironicSecretName),
-			setIronicHtpasswdHash(inspectorHtpasswdEnvVar, inspectorSecretName),
 			{
 				Name:  ironicProxyEnvVar,
 				Value: "true",
