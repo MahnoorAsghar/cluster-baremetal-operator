@@ -1,0 +1,8 @@
+commonAnnotations:
+  include.release.openshift.io/self-managed-high-availability: "true"
+  release.openshift.io/delete: "true"
+  capability.openshift.io/name: baremetal
+
+resources:
+- ../cluster-baremetal-operator-hostedcluster/cluster-baremetal-operator-hostedcluster.yaml
+

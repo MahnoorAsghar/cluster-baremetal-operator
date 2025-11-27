@@ -5,6 +5,7 @@ bases:
 - ../../rbac
 - ../../cluster-baremetal-operator
 - ../../cluster-baremetal-operator-hostedcluster
+- ../../cluster-baremetal-operator-hostedcluster-delete
 - ../../webhook
 - ../../prometheus
 
